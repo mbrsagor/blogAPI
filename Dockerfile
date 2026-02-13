@@ -1,16 +1,41 @@
-# pull the official docker image
-FROM python:3.10-slim
+# ------------------------------
+# Builder Stage
+# ------------------------------
+FROM python:3.10-alpine AS builder
 
-# set work directory
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /install
+
+# System deps
+RUN apk add --no-cache build-base
+
+COPY requirements.txt .
+RUN pip install --upgrade pip \
+    && pip install --prefix=/install --no-cache-dir -r requirements.txt
+
+# ------------------------------
+# Final Stage
+# ------------------------------
+FROM python:3.10-alpine
+
 WORKDIR /app
 
-# set env variables
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/install/bin:$PATH"
 
-# install dependencies
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+# Copy installed deps
+COPY --from=builder /install /install
 
-# copy project
-COPY . .
+# Create non-root user
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+COPY ./app ./app
+
+USER appuser
+
+EXPOSE 8000
+
+CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "app.main:app", "--bind", "0.0.0.0:8000", "--workers", "4"]
